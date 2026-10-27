@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import Hls from 'hls.js'
 
 export default function App() {
@@ -16,14 +16,24 @@ export default function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
 
+  const fetchWithProxy = async (url) => {
+    const proxies = [
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      `https://corsproxy.io/?${encodeURIComponent(url)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+    ]
+    for(let p of proxies){
+      try{ const r = await fetch(p); if(r.ok){ const t = await r.text(); return JSON.parse(t) } }catch(e){}
+    }
+    throw new Error('proxy fail')
+  }
+
   const api = async (action, extra='') => {
     let h = host.trim()
     if(!h.startsWith('http')) h = 'http://' + h
     h = h.replace(/\/$/, '')
     const url = `${h}/player_api.php?username=${user}&password=${pass}&action=${action}${extra}`
-    const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-    const res = await fetch(proxy)
-    return res.json()
+    return await fetchWithProxy(url)
   }
 
   const connect = async () => {
@@ -39,13 +49,13 @@ export default function App() {
       setStreams(Array.isArray(s) ? s : [])
       setActiveCat('all')
       if(s.length>0) play(s[0])
-    } catch(e){ setError('فشل الاتصال - تأكد من السيرفر') }
+      if(s.length===0) setError('السيرفر فارغ - لا توجد قنوات')
+    } catch(e){ setError('فشل الاتصال - السيرفر لا يرد أو محجوب، جرب Host ب https://') }
     setLoading(false)
   }
 
   const loadCat = async (catId) => {
-    setActiveCat(catId)
-    setLoading(true)
+    setActiveCat(catId); setLoading(true)
     try {
       const extra = catId === 'all' ? '' : `&category_id=${catId}`
       const s = await api(type === 'live' ? 'get_live_streams' : type === 'vod' ? 'get_vod_streams' : 'get_series', extra)
@@ -59,23 +69,14 @@ export default function App() {
     let h = host.trim()
     if(!h.startsWith('http')) h = 'http://' + h
     h = h.replace(/\/$/, '')
-    let url = ''
-    if(type === 'live') url = `${h}/live/${user}/${pass}/${s.stream_id}.m3u8`
-    else if(type === 'vod') url = `${h}/movie/${user}/${pass}/${s.stream_id}.${s.container_extension}`
-    else url = `${h}/series/${user}/${pass}/${s.stream_id || s.id}.mp4`
-
+    let url = type === 'live' ? `${h}/live/${user}/${pass}/${s.stream_id}.m3u8` : type === 'vod' ? `${h}/movie/${user}/${pass}/${s.stream_id}.${s.container_extension}` : `${h}/series/${user}/${pass}/${s.stream_id}.mp4`
     const video = videoRef.current
     if(Hls.isSupported() && url.includes('.m3u8')){
       if(hlsRef.current) hlsRef.current.destroy()
-      const hls = new Hls()
-      hlsRef.current = hls
-      hls.loadSource(url)
-      hls.attachMedia(video)
+      const hls = new Hls(); hlsRef.current = hls
+      hls.loadSource(url); hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, ()=> video.play().catch(()=>{}))
-    } else {
-      video.src = url
-      video.play().catch(()=>{})
-    }
+    } else { video.src = url; video.play().catch(()=>{}) }
   }
 
   const filtered = streams.filter(x => (x.name||x.title||'').toLowerCase().includes(search.toLowerCase()))
@@ -102,9 +103,7 @@ export default function App() {
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 ابحث..." style={{width:'100%', padding:'26px', borderRadius:'14px', border:'none', background:'#1a1a1a', color:'#fff', fontSize:'32px', marginBottom:'16px', boxSizing:'border-box'}} />
         {loading && <div style={{textAlign:'center', fontSize:'40px', color:'#ffcc00', fontWeight:'900'}}>⏳ يحمل...</div>}
         <div style={{display:'grid', gap:'14px'}}>
-          {filtered.slice(0,800).map((s,i)=>(
-            <div key={i} onClick={()=>play(s)} style={{padding:'26px', background: current?.stream_id===s.stream_id ? '#ffcc00':'#141414', color: current?.stream_id===s.stream_id ? '#000':'#fff', borderRadius:'16px', fontSize:'34px', fontWeight:'900'}}>▶️ {s.name || s.title}</div>
-          ))}
+          {filtered.slice(0,800).map((s,i)=>(<div key={i} onClick={()=>play(s)} style={{padding:'26px', background: current?.stream_id===s.stream_id ? '#ffcc00':'#141414', color: current?.stream_id===s.stream_id ? '#000':'#fff', borderRadius:'16px', fontSize:'34px', fontWeight:'900'}}>▶️ {s.name || s.title}</div>))}
         </div>
       </div>
     </div>
