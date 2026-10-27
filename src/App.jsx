@@ -1,104 +1,108 @@
 import { useState, useRef } from 'react'
 import Hls from 'hls.js'
 
-const PROXIES = [
-  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://thingproxy.freeboard.name/fetch/${url}`,
-  url => `https://cors-anywhere.herokuapp.com/${url}`,
-  url => `https://proxy.cors.sh/${url}`
-]
+const MY_PROXY = "https://api.allorigins.win/raw?url="
 
 export default function App() {
-  const [host, setHost] = useState('')
-  const [user, setUser] = useState('')
-  const [pass, setPass] = useState('')
+  const [host, setHost] = useState('http://kdfgh.com')
+  const [user, setUser] = useState('kwpnjanu')
+  const [pass, setPass] = useState('qpzgktes')
   const [channels, setChannels] = useState([])
   const [current, setCurrent] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [proxyIndex, setProxyIndex] = useState(0)
+  const [mode, setMode] = useState('')
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
 
-  const fetchWithProxies = async (url) => {
-    for(let i=0; i<PROXIES.length; i++){
-      const idx = (proxyIndex + i) % PROXIES.length
-      try{
-        const proxyUrl = PROXIES[idx](url)
-        const res = await fetch(proxyUrl, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        if(res.ok){
-          const text = await res.text()
-          try{ 
-            const json = JSON.parse(text)
-            setProxyIndex(idx)
-            return json
-          }catch{}
-        }
-      }catch(e){}
-    }
-    throw new Error('كل البروكسيات طاحو')
-  }
-
-  const connect = async () => {
-    if(!host || !user || !pass){ setError('عمر الخانات'); return }
-    setLoading(true); setError('')
+  const connect = async (useProxy) => {
+    if(!host || !user || !pass){ setError('عمر 3 خانات'); return }
+    setLoading(true); setError(''); setMode(useProxy ? 'بروكسي' : 'مباشر')
     let h = host.trim()
     if(!h.startsWith('http')) h = 'http://' + h
     h = h.replace(/\/$/, '')
+
+    const apiUrl = `${h}/player_api.php?username=${user}&password=${pass}&action=get_live_streams`
+    
     try {
-      const apiUrl = `${h}/player_api.php?username=${user}&password=${pass}&action=get_live_streams`
-      const data = await fetchWithProxies(apiUrl)
-      setChannels(Array.isArray(data) ? data : [])
-      if(data.length>0) play(data[0], h)
-      if(data.length===0) setError('ماكانش قنوات')
-    } catch(e){ setError('كل البروكسيات فشلت - جرب https للسرفر') }
+      let data
+      if(useProxy){
+        const res = await fetch(`${MY_PROXY}${encodeURIComponent(apiUrl)}`)
+        const text = await res.text()
+        data = JSON.parse(text)
+      } else {
+        // اتصال مباشر
+        const res = await fetch(apiUrl)
+        data = await res.json()
+      }
+
+      if(!Array.isArray(data) || data.length===0){ setError('معلومات غالطة أو ماكانش قنوات'); setLoading(false); return }
+      setChannels(data)
+      play(data[0], h, useProxy)
+    } catch(e){
+      if(useProxy) setError('البروكسي فشل - جرب المباشر أو بدل https')
+      else setError('المباشر فشل بسبب الحماية - جرب البروكسي')
+    }
     setLoading(false)
   }
 
-  const play = (ch, h) => {
+  const play = (ch, h, useProxy) => {
     setCurrent(ch)
     let server = h || host.trim()
     if(!server.startsWith('http')) server = 'http://' + server
     server = server.replace(/\/$/, '')
-    // بروكسي للفيديو ايضا
-    const rawUrl = `${server}/live/${user}/${pass}/${ch.stream_id}.m3u8`
-    const proxiedVideo = `https://corsproxy.io/?${encodeURIComponent(rawUrl)}`
     
+    const rawUrl = `${server}/live/${user}/${pass}/${ch.stream_id}.m3u8`
+    const finalUrl = useProxy ? `https://corsproxy.io/?${encodeURIComponent(rawUrl)}` : rawUrl
+
     const video = videoRef.current
     if(Hls.isSupported()){
       if(hlsRef.current) hlsRef.current.destroy()
       const hls = new Hls()
       hlsRef.current = hls
-      // جرب بلا بروكسي أولا، اذا فشل بالبروكسي
-      hls.loadSource(rawUrl)
+      hls.loadSource(finalUrl)
       hls.attachMedia(video)
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if(data.fatal){
-          hls.loadSource(proxiedVideo)
-        }
-      })
       hls.on(Hls.Events.MANIFEST_PARSED, ()=> video.play().catch(()=>{}))
     } else {
-      video.src = rawUrl
+      video.src = finalUrl
       video.play().catch(()=>{})
     }
   }
 
   return (
     <div style={{background:'#000', color:'#fff', minHeight:'100vh'}}>
-      <video ref={videoRef} controls style={{width:'100%', aspectRatio:'16/9', background:'#000'}} />
-      {current && <div style={{textAlign:'center', padding:'16px', fontSize:'30px', fontWeight:'900', color:'#ffcc00'}}>▶️ {current.name}</div>}
-      {error && <div style={{background:'#cc0000', padding:'14px', textAlign:'center', fontSize:'26px', fontWeight:'900'}}>{error}</div>}
-      <div style={{padding:'16px'}}>
-        <input value={host} onChange={e=>setHost(e.target.value)} placeholder="Host" style={{width:'100%', padding:'22px', borderRadius:'14px', border:'none', background:'#222', color:'#fff', fontSize:'26px', marginBottom:'12px', boxSizing:'border-box'}} />
-        <input value={user} onChange={e=>setUser(e.target.value)} placeholder="User" style={{width:'100%', padding:'22px', borderRadius:'14px', border:'none', background:'#222', color:'#fff', fontSize:'26px', marginBottom:'12px', boxSizing:'border-box'}} />
-        <input value={pass} onChange={e=>setPass(e.target.value)} placeholder="Pass" style={{width:'100%', padding:'22px', borderRadius:'14px', border:'none', background:'#222', color:'#fff', fontSize:'26px', marginBottom:'16px', boxSizing:'border-box'}} />
-        <button onClick={connect} style={{width:'100%', padding:'24px', borderRadius:'14px', border:'none', background:'#ffcc00', color:'#000', fontSize:'32px', fontWeight:'900'}}>{loading ? '⏳' : `🔌 اتصال (بروكسي ${proxyIndex+1}/${PROXIES.length})`}</button>
-        <div style={{marginTop:'16px', display:'grid', gap:'10px'}}>
+      <video ref={videoRef} controls style={{width:'100%', aspectRatio:'16/9', background:'#111'}} />
+
+      {current && <div style={{textAlign:'center', padding:'22px', fontSize:'40px', fontWeight:'900', color:'#ffcc00'}}>▶️ {current.name}</div>}
+      {error && <div style={{background:'#cc0000', padding:'22px', textAlign:'center', fontSize:'34px', fontWeight:'900'}}>{error}</div>}
+      {mode && <div style={{background:'#222', padding:'12px', textAlign:'center', fontSize:'28px', fontWeight:'900'}}>الوضع: {mode}</div>}
+
+      <div style={{padding:'20px'}}>
+        <div style={{background:'#111', padding:'24px', borderRadius:'24px', marginBottom:'20px'}}>
+          <div style={{fontSize:'32px', fontWeight:'900', marginBottom:'10px'}}>السرفر:</div>
+          <input value={host} onChange={e=>setHost(e.target.value)} style={{width:'100%', padding:'28px', borderRadius:'16px', border:'none', background:'#222', color:'#fff', fontSize:'34px', marginBottom:'18px', boxSizing:'border-box', fontWeight:'700'}} />
+
+          <div style={{fontSize:'32px', fontWeight:'900', marginBottom:'10px'}}>المستخدم:</div>
+          <input value={user} onChange={e=>setUser(e.target.value)} style={{width:'100%', padding:'28px', borderRadius:'16px', border:'none', background:'#222', color:'#fff', fontSize:'34px', marginBottom:'18px', boxSizing:'border-box', fontWeight:'700'}} />
+
+          <div style={{fontSize:'32px', fontWeight:'900', marginBottom:'10px'}}>كلمة المرور:</div>
+          <input value={pass} onChange={e=>setPass(e.target.value)} style={{width:'100%', padding:'28px', borderRadius:'16px', border:'none', background:'#222', color:'#fff', fontSize:'34px', marginBottom:'24px', boxSizing:'border-box', fontWeight:'700'}} />
+
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px'}}>
+            <button onClick={()=>connect(false)} style={{padding:'30px', borderRadius:'18px', border:'none', background:'#00e676', color:'#000', fontSize:'36px', fontWeight:'900'}}>
+              {loading && mode==='مباشر' ? '⏳...' : '🔌 مباشر'}
+            </button>
+            <button onClick={()=>connect(true)} style={{padding:'30px', borderRadius:'18px', border:'none', background:'#ffcc00', color:'#000', fontSize:'36px', fontWeight:'900'}}>
+              {loading && mode==='بروكسي' ? '⏳...' : '🌐 بروكسي'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{display:'grid', gap:'14px'}}>
           {channels.map(ch => (
-            <div key={ch.stream_id} onClick={()=>play(ch)} style={{padding:'20px', background: current?.stream_id===ch.stream_id ? '#ffcc00':'#1a1a1a', color: current?.stream_id===ch.stream_id ? '#000':'#fff', borderRadius:'12px', fontSize:'28px', fontWeight:'900'}}>{ch.name}</div>
+            <div key={ch.stream_id} onClick={()=>play(ch, host, mode==='بروكسي')} style={{padding:'28px', background: current?.stream_id===ch.stream_id ? '#ffcc00':'#1e1e1e', color: current?.stream_id===ch.stream_id ? '#000':'#fff', borderRadius:'16px', fontSize:'36px', fontWeight:'900'}}>
+              ▶️ {ch.name}
+            </div>
           ))}
         </div>
       </div>
